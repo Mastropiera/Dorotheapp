@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+.git/
+.env*
+*.md
+*.log
+.DS_Store
+pages/
+components/
+styles/
+public/
+app/
+tests/

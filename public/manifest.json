@@ -1,0 +1,27 @@
+{
+  "name": "Dorothea",
+  "short_name": "Dorothea",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F0F5FF",
+  "theme_color": "#0A4B8C",
+  "description": "Organiza tu día enfermerístico.",
+  "icons": [
+    {
+      "src": "/appuntalogo2.png",
+      "sizes": "96x96",
+      "type": "image/png"
+    },
+    {
+      "src": "/appuntalogo2.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/appuntalogo2.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

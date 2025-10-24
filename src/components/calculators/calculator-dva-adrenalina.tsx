@@ -1,0 +1,189 @@
+"use client";
+
+import React, { useState, useEffect } from 'react';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage, FormDescription } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Separator } from '@/components/ui/separator';
+import { Droplet, Weight, Syringe, Sigma, RefreshCcw, Info } from 'lucide-react';
+
+const dvaSchema = z.object({
+  peso: z.coerce.number().min(0.1, "Peso debe ser > 0 kg").optional(),
+  indicacionDosis: z.coerce.number().min(0, "Debe ser >= 0").optional(),
+  velocidadInfusion: z.coerce.number().min(0, "Debe ser >= 0").optional(),
+  drogaMg: z.coerce.number().min(0, "Debe ser >= 0").default(8),
+  volumenMl: z.coerce.number().min(1, "Debe ser > 0 ml").default(250),
+});
+
+type DvaFormValues = z.infer<typeof dvaSchema>;
+
+const DVAAdrenalinaCalculator: React.FC = () => {
+  const [calculating, setCalculating] = useState<'dose' | 'rate' | null>(null);
+
+  const form = useForm<DvaFormValues>({
+    resolver: zodResolver(dvaSchema),
+    defaultValues: {
+      drogaMg: 8,
+      volumenMl: 250,
+    },
+  });
+
+  const { watch, setValue, trigger } = form;
+  const watchedValues = watch();
+
+  useEffect(() => {
+    if (!calculating) return;
+
+    const { peso, indicacionDosis, velocidadInfusion, drogaMg, volumenMl } = watchedValues;
+    const concentracionMcgMl = (drogaMg || 0) * 1000 / (volumenMl || 1);
+
+    if (calculating === 'rate') {
+        if (peso && indicacionDosis !== undefined && concentracionMcgMl > 0) {
+            const mlh = (indicacionDosis * peso * 60) / concentracionMcgMl;
+            setValue('velocidadInfusion', parseFloat(mlh.toFixed(2)));
+        }
+    }
+
+    if (calculating === 'dose') {
+        if (peso && velocidadInfusion !== undefined && peso > 0) {
+            const dosis = (velocidadInfusion * concentracionMcgMl) / (peso * 60);
+            setValue('indicacionDosis', parseFloat(dosis.toFixed(2)));
+        }
+    }
+    
+  }, [watchedValues, calculating, setValue]);
+
+  const handleCalculate = async (type: 'dose' | 'rate') => {
+    setCalculating(null); // Reset to allow re-triggering useEffect
+    await new Promise(resolve => setTimeout(resolve, 0)); // Wait for state to update
+    
+    let isValid = false;
+    if (type === 'rate') {
+        isValid = await trigger(['peso', 'indicacionDosis', 'drogaMg', 'volumenMl']);
+    } else { // 'dose'
+        isValid = await trigger(['peso', 'velocidadInfusion', 'drogaMg', 'volumenMl']);
+    }
+    
+    if (isValid) {
+        setCalculating(type);
+    }
+  };
+  
+  const resetCalculator = () => {
+    form.reset({
+      peso: undefined,
+      indicacionDosis: undefined,
+      velocidadInfusion: undefined,
+      drogaMg: 8,
+      volumenMl: 250,
+    });
+    setCalculating(null);
+  };
+
+  const renderInputField = (name: keyof DvaFormValues, label: string, unit: string, icon?: React.ReactNode, description?: string) => (
+    <FormField
+      control={form.control}
+      name={name}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel className="flex items-center text-sm">{icon && <span className="mr-2 h-4 w-4">{icon}</span>}{label}</FormLabel>
+          <div className="flex items-center">
+            <FormControl>
+              <Input
+                type="number"
+                {...field}
+                value={field.value ?? ''}
+                onChange={e => field.onChange(e.target.value === '' ? undefined : parseFloat(e.target.value))}
+                onFocus={e => e.target.select()}
+                className="h-9"
+              />
+            </FormControl>
+            <span className="ml-2 text-sm text-muted-foreground">{unit}</span>
+          </div>
+          {description && <FormDescription className="text-xs">{description}</FormDescription>}
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+  
+  const concentracion = ((watchedValues.drogaMg || 0) * 1000) / (watchedValues.volumenMl || 1);
+
+  return (
+    <Card className="w-full max-w-xl mx-auto">
+      <CardHeader>
+        <CardTitle className="flex items-center"><Syringe className="mr-2 h-6 w-6 text-red-500" />Cálculo de Adrenalina (Epinefrina)</CardTitle>
+        <CardDescription>
+          Calcula la velocidad de infusión (ml/h) o la dosis (µg/kg/min) para Adrenalina.
+        </CardDescription>
+        <p className="text-xs italic text-muted-foreground pt-2">
+            Catecolamina. Agonista alfa y beta - adrenérgico. Vasopresor, inótropo y cronótropo positivo. Agonista alfa 1, alfa 2, beta 1, beta 2, beta 3.
+        </p>
+        <p className="text-xs text-muted-foreground pt-1">Presentación: Ampolla de 1mg/1ml</p>
+        <p className="text-xs text-muted-foreground pt-1">Dosis: 0,01 a 0,5µg/kg/min</p>
+        <p className="text-xs text-muted-foreground pt-1">Preparación estándar: 8 ampollas en 250 ml de SF 0,9%/SG 5% = 32µg/ml</p>
+      </CardHeader>
+      <CardContent>
+        <Form {...form}>
+          <form className="space-y-6">
+            <Card className="p-4 bg-muted/30">
+                <CardHeader className="p-0 pb-2 mb-2"><CardTitle className="text-base">Datos de la Dilución</CardTitle></CardHeader>
+                <CardContent className="p-0 grid grid-cols-2 gap-4">
+                    {renderInputField("drogaMg", "Fármaco (Adrenalina)", "mg")}
+                    {renderInputField("volumenMl", "Volumen Total", "ml")}
+                    <div className="col-span-2 text-sm font-medium text-center p-2 bg-background rounded-md">
+                        Concentración: {concentracion.toFixed(2)} µg/ml
+                    </div>
+                </CardContent>
+            </Card>
+            
+            <div className="space-y-4">
+                {renderInputField("peso", "Peso del Paciente", "kg", <Weight />)}
+                <Separator/>
+
+                <div className="p-4 border rounded-lg shadow-sm">
+                    <h4 className="font-semibold mb-2">Calcular Velocidad de Infusión</h4>
+                    {renderInputField("indicacionDosis", "Dosis Indicada", "µg/kg/min", <Syringe />)}
+                    <Button type="button" onClick={() => handleCalculate('rate')} className="mt-2 w-full">Calcular ml/h</Button>
+                </div>
+
+                <div className="text-center text-sm font-semibold text-muted-foreground">O</div>
+                
+                <div className="p-4 border rounded-lg shadow-sm">
+                    <h4 className="font-semibold mb-2">Calcular Dosis</h4>
+                    {renderInputField("velocidadInfusion", "Velocidad de Infusión", "ml/h", <Syringe />)}
+                    <Button type="button" onClick={() => handleCalculate('dose')} className="mt-2 w-full">Calcular µg/kg/min</Button>
+                </div>
+            </div>
+            
+            <div className="flex flex-col sm:flex-row gap-2 pt-4">
+              <Button type="button" variant="outline" onClick={resetCalculator} className="w-full sm:w-auto">
+                <RefreshCcw className="mr-2 h-4 w-4" /> Limpiar Todo
+              </Button>
+            </div>
+          </form>
+        </Form>
+        <Separator className="my-8" />
+        <div className="text-xs text-muted-foreground space-y-2">
+            <p className="flex items-start"><Info size={24} className="mr-2 flex-shrink-0 text-blue-500"/>
+                Esta calculadora utiliza las fórmulas estándar para la infusión de drogas vasoactivas.
+            </p>
+            <p><strong>Fórmulas:</strong></p>
+            <ul className="list-disc list-inside pl-4">
+                <li>ml/h = (Dosis [µg/kg/min] × Peso [kg] × 60) / Concentración [µg/ml]</li>
+                <li>Dosis [µg/kg/min] = (Velocidad [ml/h] × Concentración [µg/ml]) / (Peso [kg] × 60)</li>
+            </ul>
+             <p className="italic">
+                Verifique siempre los cálculos y protocolos institucionales. Esta herramienta es una ayuda y no reemplaza el juicio clínico. La dilución estándar para Adrenalina es de 8mg en 250ml.
+            </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+export default DVAAdrenalinaCalculator;
