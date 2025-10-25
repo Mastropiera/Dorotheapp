@@ -23,4 +23,4 @@ export default function Page() {
   }
 
   return <AppContent />;
-}
+}// Force rebuild
