@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
@@ -14,7 +13,6 @@ declare global {
   interface Window {
     google: any;
     gapi: any;
-    tokenClient: any;
   }
 }
 
@@ -37,24 +35,10 @@ const GoogleApiContext = createContext<GoogleApiContextType | undefined>(undefin
 
 export const GoogleApiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, logout: authLogout } = useAuth();
   const [isGapiReady, setIsGapiReady] = useState(false);
-  const [isGisReady, setIsGisReady] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-
-  const TOKEN_VERSION_KEY = 'google_token_version';
-  const CURRENT_TOKEN_VERSION = '2';
-
-  const clearOldTokenIfNeeded = useCallback(() => {
-    if (typeof window === 'undefined') return;
-    const savedVersion = localStorage.getItem(TOKEN_VERSION_KEY);
-    if (savedVersion !== CURRENT_TOKEN_VERSION) {
-      localStorage.removeItem('google_access_token');
-      localStorage.setItem(TOKEN_VERSION_KEY, CURRENT_TOKEN_VERSION);
-      console.log('Token antiguo eliminado. Se requiere nueva autenticación.');
-    }
-  }, []);
 
   const handleGapiLoad = useCallback(() => {
     window.gapi.load('client', () => {
@@ -64,83 +48,77 @@ export const GoogleApiProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
   }, []);
 
-  const handleGisLoad = useCallback(() => {
-    if (window.google && window.google.accounts) {
-        window.tokenClient = window.google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: GOOGLE_API_SCOPES,
-        prompt: 'consent',
-        callback: (tokenResponse: any) => {
-            if (tokenResponse.access_token) {
-                window.gapi.client.setToken(tokenResponse);
-                localStorage.setItem('google_access_token', tokenResponse.access_token);
-                setIsAuthorized(true);
-                toast({ 
-                    title: "✅ Conectado a Google", 
-                    description: "Tu calendario ahora se sincronizará automáticamente."
-                });
-            }
-        },
-        });
-        setIsGisReady(true);
-    }
-  }, [toast]);
-
   const logout = useCallback(() => {
     localStorage.removeItem('google_access_token');
-    localStorage.removeItem(TOKEN_VERSION_KEY);
     if (window.gapi?.client?.getToken()) {
-      const token = window.gapi.client.getToken();
-      if (token && window.google) {
-        window.google.accounts.oauth2.revoke(token.access_token, () => {
-          window.gapi.client.setToken(null);
-          setIsAuthorized(false);
-          toast({ 
-            title: "Desconectado", 
-            description: "Tu cuenta de Google ha sido desconectada."
-          });
-        });
-      }
-    } else {
-      setIsAuthorized(false);
+      window.gapi.client.setToken(null);
     }
+    setIsAuthorized(false);
+    toast({ 
+      title: "Desconectado", 
+      description: "Tu cuenta de Google ha sido desconectada."
+    });
   }, [toast]);
   
+  // Cargar el token automáticamente cuando GAPI esté listo
   useEffect(() => {
-    if (isGapiReady && isGisReady) {
-      clearOldTokenIfNeeded();
+    if (isGapiReady && user) {
       const savedToken = localStorage.getItem('google_access_token');
       if (savedToken) {
         window.gapi.client.setToken({ access_token: savedToken });
-        window.gapi.client.load('calendar', 'v3').then(() => {
-            setIsAuthorized(true);
-        }).catch((err: any) => {
-            console.error("Error loading calendar API on init", err);
-            logout();
-        }).finally(() => {
-            setIsLoading(false);
+        
+        // Cargar las APIs necesarias
+        Promise.all([
+          window.gapi.client.load('calendar', 'v3'),
+          window.gapi.client.load('tasks', 'v1')
+        ])
+        .then(() => {
+          setIsAuthorized(true);
+          console.log('✅ Google Calendar y Tasks cargados automáticamente');
+        })
+        .catch((err: any) => {
+          console.error("Error loading Google APIs:", err);
+          // Si hay error, probablemente el token expiró o no tiene los scopes necesarios
+          logout();
+          toast({
+            title: "Reconecta tu cuenta",
+            description: "Por favor, cierra sesión y vuelve a iniciar sesión con Google para actualizar los permisos.",
+            variant: "default"
+          });
+        })
+        .finally(() => {
+          setIsLoading(false);
         });
       } else {
         setIsLoading(false);
+        // Si no hay token, mostrar mensaje para que inicie sesión
+        if (user) {
+          toast({
+            title: "Conecta Google Calendar",
+            description: "Cierra sesión y vuelve a iniciar sesión con Google para sincronizar tu calendario.",
+            variant: "default"
+          });
+        }
       }
+    } else if (isGapiReady && !user) {
+      setIsLoading(false);
     }
-  }, [isGapiReady, isGisReady, logout, clearOldTokenIfNeeded]);
+  }, [isGapiReady, user, logout, toast]);
 
-
+  // La función login ahora simplemente informa al usuario que debe usar el login principal
   const login = useCallback(() => {
-    if (window.tokenClient) {
-      window.tokenClient.requestAccessToken({ prompt: 'consent' });
-    } else {
-      toast({ 
-        title: "Error", 
-        description: "El cliente de Google no está listo.", 
-        variant: "destructive" 
-      });
-    }
+    toast({ 
+      title: "Usa el login principal", 
+      description: "Por favor, cierra sesión y vuelve a iniciar sesión con Google para obtener los permisos necesarios.", 
+      variant: "default" 
+    });
   }, [toast]);
 
   const getGoogleCalendarEvents = async (startDate: Date, endDate: Date): Promise<GoogleCalendarEvent[]> => {
-    if (!isAuthorized) return [];
+    if (!isAuthorized) {
+      console.log('❌ No autorizado para Google Calendar');
+      return [];
+    }
     try {
       const response = await window.gapi.client.calendar.events.list({
         'calendarId': 'primary',
@@ -155,13 +133,23 @@ export const GoogleApiProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch (error: any) {
       console.error('Error fetching calendar events:', error?.result?.error?.message || error);
       if (error.status === 401) {
-          logout();
-          toast({ title: "Sesión de Google Expirada", description: "Por favor, vuelve a conectar tu cuenta de Google.", variant: "destructive" });
+        logout();
+        toast({ 
+          title: "Sesión de Google Expirada", 
+          description: "Por favor, vuelve a iniciar sesión con Google.", 
+          variant: "destructive" 
+        });
+      } else if (error?.result?.error?.message?.includes('insufficient')) {
+        toast({ 
+          title: "Permisos insuficientes", 
+          description: "Cierra sesión y vuelve a iniciar sesión con Google para actualizar los permisos.", 
+          variant: "destructive" 
+        });
       } else {
         toast({ 
-            title: "Error de Calendario", 
-            description: `No se pudieron cargar los eventos: ${error?.result?.error?.message || 'Error desconocido.'}`, 
-            variant: "destructive" 
+          title: "Error de Calendario", 
+          description: `No se pudieron cargar los eventos: ${error?.result?.error?.message || 'Error desconocido.'}`, 
+          variant: "destructive" 
         });
       }
       return [];
@@ -239,7 +227,6 @@ export const GoogleApiProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const getGoogleTasks = async (): Promise<GoogleTask[]> => {
     if (!isAuthorized) return [];
     try {
-      await window.gapi.client.load('tasks', 'v1');
       const taskListsResponse = await window.gapi.client.tasks.tasklists.list({ maxResults: 10 });
       const taskLists = taskListsResponse.result.items;
       if (!taskLists || taskLists.length === 0) return [];
@@ -285,7 +272,6 @@ export const GoogleApiProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       deleteGoogleTask
     }}>
       <Script src="https://apis.google.com/js/api.js" async defer onLoad={handleGapiLoad} />
-      <Script src="https://accounts.google.com/gsi/client" async defer onLoad={handleGisLoad} />
       {children}
     </GoogleApiContext.Provider>
   );
